@@ -4,8 +4,6 @@ import modules.scripts as scripts
 import modules.images
 import gradio as gr
 import numpy as np
-import tempfile
-import random
 import cv2
 from PIL import Image, ImageSequence
 from modules.processing import Processed, process_images
@@ -264,7 +262,7 @@ class Script(scripts.Script):
             #Generate frames
             out_filename = out_filename_png.replace(".png",".mp4")
             out_clip = inc_clip.fl_image(lambda image: generate_frame(image, p=copy_p))
-            out_clip.write_videofile(out_filename, codec='h264', progress_bar=False)
+            out_clip.write_videofile(out_filename, codec='h264')
             #Save a PNG potentially with PNGINFO
             current_info = self.infotexts[len(self.infotexts)-1]
             modules.images.save_image(prv_frame, p.outpath_samples, "frame2frame", info=current_info, forced_filename = out_filename_noext, extension = 'png')
