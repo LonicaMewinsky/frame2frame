@@ -1,5 +1,5 @@
 # frame2frame
-Automatic1111 Stable Diffusion WebUI extension, generates img2img against frames in video files. Audio retention not working at the moment.
+Automatic1111 Stable Diffusion WebUI extension, generates img2img against frames in video files. Best-effort to retain audio.
 
 Currently in-development but working. Mostly. Will succeed [gif2gif](https://github.com/LonicaMewinsky/gif2gif) in the near future.
 
