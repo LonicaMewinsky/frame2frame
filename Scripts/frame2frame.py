@@ -41,6 +41,7 @@ def blend_images(images):
 class Script(scripts.Script):
     def __init__(self):
         #self.frame2frame_dir = tempfile.TemporaryDirectory()
+        self.gif_mode = False
         self.active_file = None
         self.audio_codec = None
         self.video_codec = None
@@ -79,8 +80,8 @@ class Script(scripts.Script):
                             with gr.Tab("Configuration"):
                                 with gr.Box():
                                     desired_fps_slider = gr.Slider(0.01, 1.00, step = 0.01, value=1.00, interactive = True, label = "Processing FPS reduction")
-                                    desired_fps = gr.Textbox(value="", interactive = False, label = "Resultant FPS")
-                                    desired_frames = gr.Textbox(value="", interactive = False, label = "Resultant frames (generations)")
+                                    desired_fps = gr.Number(value=0, interactive = False, label = "Resultant FPS")
+                                    desired_frames = gr.Number(value=0, interactive = False, label = "Resultant frames (generations)")
                             with gr.Tab("Options"):
                                 with gr.Box():
                                     anim_resize = gr.Checkbox(value = True, label="Resize result back to original dimensions")
@@ -88,9 +89,9 @@ class Script(scripts.Script):
                                     anim_common_seed = gr.Checkbox(value = True, label="For -1 seed, all frames in an animation have fixed seed")
                             with gr.Tab("Info"):
                                 with gr.Box():
-                                    anim_fps = gr.Textbox(value="", interactive = False, label = "Original FPS")
-                                    anim_runtime = gr.Textbox(value="", interactive = False, label = "Original runtime")
-                                    anim_frames = gr.Textbox(value="", interactive = False, label = "Original total frames")
+                                    anim_fps = gr.Number(value=0, interactive = False, label = "Original FPS")
+                                    anim_runtime = gr.Number(value=0, interactive = False, label = "Original runtime")
+                                    anim_frames = gr.Number(value=0, interactive = False, label = "Original total frames")
                             ''' To be re-implemented
                             with gr.Tab("Loopback"):
                                 with gr.Box():
@@ -122,10 +123,12 @@ class Script(scripts.Script):
                     #Collect and set info
                     pimg = Image.open(file.name)
                     self.orig_width = pimg.width
+                    self.orig_height = pimg.height
                     self.orig_gif_dur = pimg.info["duration"]
                     self.orig_num_frames = pimg.n_frames
                     self.orig_fps = round((1000 / self.orig_gif_dur), 2)
-                    return file.name, file.name, cl8(pimg.width), cl8(pimg.height), gr.File.update(visible=False), gr.Image.update(value=file.name, visible=True), gr.Video.update(visible=False), self.orig_fps, self.orig_runtime, self.orig_num_frames, round(self.orig_fps*fps_factor, 2), int(self.orig_num_frames*fps_factor)
+                    self.gif_mode = True
+                    return file.name, file.name, cl8(pimg.width), cl8(pimg.height), gr.File.update(visible=False), gr.Image.update(value=file.name, visible=True), gr.Video.update(visible=False), self.orig_fps, self.orig_runtime, self.orig_num_frames, round(self.orig_fps*fps_factor, 2), round(self.orig_num_frames*fps_factor)
                 except:
                     print(f"Trouble loading GIF/WEBP file {file.name}")
                     self.active_file = None
@@ -150,8 +153,9 @@ class Script(scripts.Script):
                     if success:
                         cimg = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                         pimg = Image.fromarray(cimg).convert("RGB")
+                        self.gif_mode = False
                         vstream.release()
-                        return pimg, pimg, cl8(pimg.width), cl8(pimg.height), gr.File.update(visible=False), gr.Image.update(visible=False), gr.Video.update(value=file.name, visible=True), self.orig_fps, self.orig_runtime, self.orig_num_frames, round(self.orig_fps*fps_factor, 2), int(self.orig_num_frames*fps_factor)
+                        return pimg, pimg, cl8(pimg.width), cl8(pimg.height), gr.File.update(visible=False), gr.Image.update(visible=False), gr.Video.update(value=file.name, visible=True), self.orig_fps, self.orig_runtime, self.orig_num_frames, round(self.orig_fps*fps_factor, 2), round(self.orig_num_frames*fps_factor)
                     else: vstream.release()
                 except:
                     print(f"Trouble loading video file {file.name}")
@@ -176,13 +180,13 @@ class Script(scripts.Script):
             if self.orig_fps == 0:
                 return None, None
             else:
-                return round(self.orig_fps*fps_factor, 2), int(self.orig_num_frames*fps_factor)
+                return round(self.orig_fps*fps_factor, 2), round(self.orig_num_frames*fps_factor)
 
         upload_anim.upload(fn=process_upload, inputs=[upload_anim, desired_fps_slider], outputs=[self.img2img_component, self.img2img_inpaint_component, self.img2img_w_slider, self.img2img_h_slider,  upload_anim, preview_gif, preview_vid, anim_fps, anim_runtime, anim_frames, desired_fps, desired_frames])
         preview_gif.change(fn=clear_anim, inputs=preview_gif, outputs=[self.img2img_component, self.img2img_inpaint_component, upload_anim, preview_gif, preview_vid, anim_fps, anim_runtime, anim_frames, desired_fps, desired_frames])
         preview_vid.change(fn=clear_anim, inputs=preview_vid, outputs=[self.img2img_component, self.img2img_inpaint_component, upload_anim, preview_gif, preview_vid, anim_fps, anim_runtime, anim_frames, desired_fps, desired_frames])
         desired_fps_slider.change(fn=updatefps, inputs=[desired_fps_slider], outputs=[desired_fps, desired_frames])
-        return [upload_anim, anim_clear_frames, anim_common_seed, anim_resize, desired_fps, desired_frames]
+        return [upload_anim, anim_clear_frames, anim_common_seed, anim_resize, desired_fps, desired_frames, desired_fps_slider]
 
     #Grab the img2img image components for update later
     #Maybe there's a better way to do this?
@@ -200,10 +204,13 @@ class Script(scripts.Script):
             self.img2img_h_slider = component
             return self.img2img_h_slider
 
-    def run(self, p, upload_anim, anim_clear_frames, anim_common_seed, anim_resize, desired_fps, desired_frames):
+    def run(self, p, upload_anim, anim_clear_frames, anim_common_seed, anim_resize, desired_fps, desired_frames, desired_fps_slider):
         try:
-            inc_clip_raw = VideoFileClip(upload_anim.name)
-            inc_clip = inc_clip_raw.set_fps(float(desired_fps))
+            if self.gif_mode:
+                inc_gif = Image.open(upload_anim.name)
+            else:
+                inc_clip_raw = VideoFileClip(upload_anim.name)
+                inc_clip = inc_clip_raw.set_fps(desired_fps)
         except:
             print("Something went wrong with animation. Processing still from img2img.")
             proc = process_images(p)
@@ -213,12 +220,11 @@ class Script(scripts.Script):
         
         #Actual generation function
         def generate_frame(image, p):
-            pimg = Image.fromarray(image)
             if state.skipped: state.skipped = False
             if state.interrupted: return
             state.job = f"{state.job_no + 1} out of {state.job_count}"
-            copy_p.init_images = [pimg] * p.batch_size
-            copy_p.control_net_input_image = pimg.convert("RGB")
+            copy_p.init_images = [image] * p.batch_size
+            copy_p.control_net_input_image = image.convert("RGB")
             proc = process_images(copy_p) #process
             #Handle batches
             proc_batch = []
@@ -233,12 +239,16 @@ class Script(scripts.Script):
                     return_img = return_img.resize((self.orig_width, self.orig_height))
             self.all_prompts = proc.all_prompts
             self.infotexts = proc.infotexts
-            return_img = np.array(return_img)
 
-            return return_img #np array!
+            return return_img 
+        
+        #Wrapper for moviepy function
+        def generate_mpframe(image, p):
+            nimg = Image.fromarray(image)
+            return np.array(generate_frame(nimg, p))
         
         #Fix/setup vars
-        state.job_count = int(desired_frames) * p.n_iter
+        state.job_count = int(desired_frames * p.n_iter)
         p.do_not_save_grid = True
         p.do_not_save_samples = anim_clear_frames
         anim_n_iter = p.n_iter
@@ -252,17 +262,30 @@ class Script(scripts.Script):
             copy_p = copy.copy(p)
             if(anim_common_seed and (p.seed == -1)):
                 modules.processing.fix_seed(copy_p)
-            prv_frame = Image.fromarray(inc_clip.get_frame(1))
+            if self.gif_mode:
+                prv_frame = ImageSequence.Iterator(inc_gif)[0]
+            else:
+                prv_frame = Image.fromarray(inc_clip.get_frame(1))
             out_filename_png = (modules.images.save_image(prv_frame, p.outpath_samples, "frame2frame", extension = 'png')[0])
             out_filename_noext = os.path.basename(out_filename_png).split(".")[0]
             if not anim_clear_frames:
                 copy_p.outpath_samples = os.path.join(p.outpath_samples, out_filename_noext)
                 print(f"Saving intermediary files to {copy_p.outpath_samples}..")
-            color_correction = [modules.processing.setup_color_correction(copy_p.init_images[0])]
+            #color_correction = [modules.processing.setup_color_correction(copy_p.init_images[0])]
             #Generate frames
-            out_filename = out_filename_png.replace(".png",".mp4")
-            out_clip = inc_clip.fl_image(lambda image: generate_frame(image, p=copy_p))
-            out_clip.write_videofile(out_filename)
+            if self.gif_mode:
+                generated_frames = []
+                out_filename = out_filename_png.replace(".png",".gif")
+                for frame in ImageSequence.Iterator(inc_gif):
+                    generated_frames.append(generate_frame(frame, p=copy_p))
+                    print(len(generated_frames))
+                generated_frames[0].save(out_filename,
+                    save_all = True, append_images = generated_frames[1:], loop = 0,
+                    optimize = False, duration = self.orig_gif_dur)
+            else:
+                out_filename = out_filename_png.replace(".png",".mp4")
+                out_clip = inc_clip.fl_image(lambda image: generate_mpframe(image, p=copy_p))
+                out_clip.write_videofile(out_filename)
             #Save a PNG potentially with PNGINFO
             current_info = self.infotexts[len(self.infotexts)-1]
             modules.images.save_image(prv_frame, p.outpath_samples, "frame2frame", info=current_info, forced_filename = out_filename_noext, extension = 'png')
