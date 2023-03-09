@@ -6,7 +6,7 @@ import gradio as gr
 import numpy as np
 import cv2
 import tempfile
-from PIL import Image, ImageSequence, ImageOps
+from PIL import Image
 from modules.processing import Processed, process_images
 from modules.shared import state
 from moviepy.editor import VideoFileClip
@@ -26,7 +26,29 @@ def cl8(num):
         return round(num - rem)
     else:
         return round(num + (8 - rem))
-    
+
+def squishlist(inlist, scale=0.5):
+    num_new_elements = round(len(inlist)*scale)
+    new_list = []
+    for i in range(num_new_elements):
+        #Will lose the last chunk of elements if not even
+        index = int(i * len(inlist) / num_new_elements)
+        new_list.append(inlist[index])
+    if len(new_list) == 0: #never return an empty list
+        new_list.append(inlist[0])
+    return new_list
+
+def giftolist(gif_path):
+    with Image.open(gif_path) as im:
+        frames = []
+        try:
+            while True:
+                frames.append(im.copy())
+                im.seek(len(frames))
+        except EOFError:
+            pass
+    return frames
+
 def blend_images(images):
     sizes = [img.size for img in images]
     min_width, min_height = min(sizes, key=lambda s: s[0]*s[1])
@@ -129,6 +151,7 @@ class Script(scripts.Script):
                     self.orig_width = pimg.width
                     self.orig_height = pimg.height
                     self.orig_gif_dur = pimg.info["duration"]
+                    self.desired_gif_dur = self.orig_gif_dur
                     self.orig_num_frames = pimg.n_frames
                     self.orig_fps = round((1000 / self.orig_gif_dur), 2)
                     self.gif_mode = True
@@ -184,6 +207,8 @@ class Script(scripts.Script):
             if self.orig_fps == 0:
                 return None, None
             else:
+                if self.gif_mode:
+                    self.desired_gif_dur = self.orig_gif_dur/fps_factor
                 return round(self.orig_fps*fps_factor, 2), round(self.orig_num_frames*fps_factor)
 
         upload_anim.upload(fn=process_upload, inputs=[upload_anim, desired_fps_slider], outputs=[self.img2img_component, self.img2img_inpaint_component, self.img2img_w_slider, self.img2img_h_slider,  upload_anim, preview_gif, preview_vid, anim_fps, anim_runtime, anim_frames, desired_fps, desired_frames])
@@ -211,12 +236,15 @@ class Script(scripts.Script):
     def run(self, p, upload_anim, anim_clear_frames, anim_common_seed, anim_resize, desired_fps, desired_frames, desired_fps_slider, *args):
         try:
             if self.gif_mode:
-                inc_gif = Image.open(upload_anim.name)
+                #inc_gif = Image.open(upload_anim.name)
+                inc_frames = giftolist(upload_anim)
+                squish_scale = round(desired_fps/self.orig_fps, 2)
+                inc_frames = squishlist(inc_frames, squish_scale)
             else:
                 framedir = tempfile.TemporaryDirectory()
                 soundtrack_file = f"{framedir.name}/soundtrack.mp3"
                 inc_clip_raw = VideoFileClip(upload_anim.name)
-                if inc_clip_raw.audio != None:
+                if inc_clip_raw.audio != None: #Save the audio if exists
                     inc_clip_raw.audio.write_audiofile(soundtrack_file)
                 inc_clip = inc_clip_raw.set_fps(desired_fps)
         except:
@@ -271,7 +299,7 @@ class Script(scripts.Script):
             if(anim_common_seed and (p.seed == -1)):
                 modules.processing.fix_seed(copy_p)
             if self.gif_mode:
-                prv_frame = ImageSequence.Iterator(inc_gif)[0]
+                prv_frame = inc_frames[0]
             else:
                 prv_frame = Image.fromarray(inc_clip.get_frame(1))
             out_filename_png = (modules.images.save_image(prv_frame, p.outpath_samples, "frame2frame", extension = 'png')[0])
@@ -284,19 +312,17 @@ class Script(scripts.Script):
             if self.gif_mode:
                 generated_frames = []
                 out_filename = out_filename_png.replace(".png",".gif")
-                for frame in ImageSequence.Iterator(inc_gif):
+                for frame in inc_frames:
                     generated_frames.append(generate_frame(frame, p=copy_p))
-                    print(len(generated_frames))
                 generated_frames[0].save(out_filename,
                     save_all = True, append_images = generated_frames[1:], loop = 0,
-                    optimize = False, duration = self.orig_gif_dur)
+                    optimize = False, duration = int(self.desired_gif_dur))
             else:
                 out_filename = out_filename_png.replace(".png",".mp4")
                 out_clip = inc_clip.fl_image(lambda image: generate_mpframe(image, p=copy_p))
                 out_clip.write_videofile(filename=out_filename, audio=False)
-                if inc_clip_raw.audio != None:
+                if inc_clip_raw.audio != None: #Restore audio if present
                     video.io.ffmpeg_tools.ffmpeg_merge_video_audio(out_filename, soundtrack_file, out_filename.replace(".mp4","_WithAudio.mp4"))
-
 
             #Save a PNG potentially with PNGINFO
             current_info = self.infotexts[len(self.infotexts)-1]
