@@ -6,7 +6,7 @@ import gradio as gr
 import numpy as np
 import cv2
 import tempfile
-from PIL import Image, ImageSequence
+from PIL import Image, ImageSequence, ImageOps
 from modules.processing import Processed, process_images
 from modules.shared import state
 from moviepy.editor import VideoFileClip
@@ -81,14 +81,17 @@ class Script(scripts.Script):
                         with gr.Tabs():
                             with gr.Tab("Configuration"):
                                 with gr.Box():
-                                    desired_fps_slider = gr.Slider(0.01, 1.00, step = 0.01, value=1.00, interactive = True, label = "Processing FPS reduction")
-                                    desired_fps = gr.Number(value=0, interactive = False, label = "Resultant FPS")
-                                    desired_frames = gr.Number(value=0, interactive = False, label = "Resultant frames (generations)")
+                                    with gr.Column():
+                                        desired_fps_slider = gr.Slider(0.01, 1.00, step = 0.01, value=1.00, interactive = True, label = "Processing FPS reduction")
+                                        desired_fps = gr.Number(value=0, interactive = False, label = "Resultant FPS")
+                                        desired_frames = gr.Number(value=0, interactive = False, label = "Resultant frames (generations)")
+                                        recalc_button = gr.Button("Recalculate FPS")
                             with gr.Tab("Options"):
                                 with gr.Box():
                                     anim_resize = gr.Checkbox(value = True, label="Resize result back to original dimensions")
                                     anim_clear_frames = gr.Checkbox(value = True, label="Delete intermediate frames after generation")
                                     anim_common_seed = gr.Checkbox(value = True, label="For -1 seed, all frames in an animation have fixed seed")
+                                    anim_automask = gr.Checkbox(value = True, label="Automatically mask fask")
                             with gr.Tab("Info"):
                                 with gr.Box():
                                     anim_fps = gr.Number(value=0, interactive = False, label = "Original FPS")
@@ -187,8 +190,8 @@ class Script(scripts.Script):
         upload_anim.upload(fn=process_upload, inputs=[upload_anim, desired_fps_slider], outputs=[self.img2img_component, self.img2img_inpaint_component, self.img2img_w_slider, self.img2img_h_slider,  upload_anim, preview_gif, preview_vid, anim_fps, anim_runtime, anim_frames, desired_fps, desired_frames])
         preview_gif.change(fn=clear_anim, inputs=preview_gif, outputs=[self.img2img_component, self.img2img_inpaint_component, upload_anim, preview_gif, preview_vid, anim_fps, anim_runtime, anim_frames, desired_fps, desired_frames])
         preview_vid.change(fn=clear_anim, inputs=preview_vid, outputs=[self.img2img_component, self.img2img_inpaint_component, upload_anim, preview_gif, preview_vid, anim_fps, anim_runtime, anim_frames, desired_fps, desired_frames])
-        desired_fps_slider.change(fn=updatefps, inputs=[desired_fps_slider], outputs=[desired_fps, desired_frames])
-        return [upload_anim, anim_clear_frames, anim_common_seed, anim_resize, desired_fps, desired_frames, desired_fps_slider]
+        recalc_button.click(fn=updatefps, inputs=[desired_fps_slider], outputs=[desired_fps, desired_frames])
+        return [upload_anim, anim_clear_frames, anim_common_seed, anim_resize, desired_fps, desired_frames, desired_fps_slider, anim_automask]
 
     #Grab the img2img image components for update later
     #Maybe there's a better way to do this?
@@ -206,7 +209,7 @@ class Script(scripts.Script):
             self.img2img_h_slider = component
             return self.img2img_h_slider
 
-    def run(self, p, upload_anim, anim_clear_frames, anim_common_seed, anim_resize, desired_fps, desired_frames, desired_fps_slider):
+    def run(self, p, upload_anim, anim_clear_frames, anim_common_seed, anim_resize, desired_fps, desired_frames, desired_fps_slider, anim_automask, *args):
         try:
             if self.gif_mode:
                 inc_gif = Image.open(upload_anim.name)
