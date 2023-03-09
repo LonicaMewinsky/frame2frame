@@ -8,4 +8,4 @@ Currently in-development but working. Mostly. Will succeed [gif2gif](https://git
 - Attempts to extracts and restores audio to file. To be made optional later.
 - Does not require intermediary images saved to disk, but you can choose to.
 - Currently defaults to H264 output, more codecs to be added.
-- GIFs work, but currently do not respect FPS controls.
+- Accepts GIFs as well
