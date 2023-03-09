@@ -6,14 +6,12 @@ import gradio as gr
 import numpy as np
 import cv2
 import tempfile
+import importlib
 from PIL import Image
 from modules.processing import Processed, process_images
 from modules.shared import state
 from moviepy.editor import VideoFileClip
 from moviepy import video
-''' To be re-implemented
-with open(os.path.join(scripts.basedir(), "instructions.txt"), 'r') as file:
-    mkd_inst = file.read()'''
 
 types_vid = ['.mp4', '.mkv', '.avi', '.ogv', '.ogg', '.webm']
 types_gif = ['.gif', '.webp']
@@ -118,25 +116,7 @@ class Script(scripts.Script):
                                     anim_fps = gr.Number(value=0, interactive = False, label = "Original FPS")
                                     anim_runtime = gr.Number(value=0, interactive = False, label = "Original runtime")
                                     anim_frames = gr.Number(value=0, interactive = False, label = "Original total frames")
-                            ''' To be re-implemented
-                            with gr.Tab("Loopback"):
-                                with gr.Box():
-                                    loop_backs = gr.Slider(0, 50, step = 1, label = "Generation loopbacks", value = 0)
-                                    loop_denoise = gr.Slider(0.01, 1, step = 0.01, value=0.10, interactive = True, label = "Loopback denoise strength")
-                                    loop_decay = gr.Slider(0, 2, step = 0.05, value=1.0, interactive = True, label = "Loopback decay")
-                            with gr.Tab("Upscaling"):
-                                    with gr.Column():
-                                        with gr.Row():
-                                            ups_upscaler = gr.Dropdown(value = "None", interactive = True, choices = [x.name for x in sd_upscalers], label = "Upscaler")
-                                            ups_only_upscale = gr.Checkbox(value = False, label = "No generation, only upscale")
-                                        with gr.Tabs():
-                                            with gr.Tab("Scale by") as tab_scale_by:
-                                                with gr.Box():
-                                                    ups_scale_by = gr.Slider(1, 8, step = 0.1, value=2, interactive = True, label = "Factor")
-                                            with gr.Tab("Scale to") as tab_scale_to:
-                                                with gr.Box():
-                                                    ups_scale_to_w = gr.Slider(0, 8000, step = 8, value=512, interactive = True, label = "Target width")
-                                                    ups_scale_to_h = gr.Slider(0, 8000, step = 8, value=512, interactive = True, label = "Target height")'''
+
         #Control funcs
         def process_upload(file, fps_factor):
             if file == None:
@@ -215,7 +195,7 @@ class Script(scripts.Script):
         preview_gif.change(fn=clear_anim, inputs=preview_gif, outputs=[self.img2img_component, self.img2img_inpaint_component, upload_anim, preview_gif, preview_vid, anim_fps, anim_runtime, anim_frames, desired_fps, desired_frames])
         preview_vid.change(fn=clear_anim, inputs=preview_vid, outputs=[self.img2img_component, self.img2img_inpaint_component, upload_anim, preview_gif, preview_vid, anim_fps, anim_runtime, anim_frames, desired_fps, desired_frames])
         recalc_button.click(fn=updatefps, inputs=[desired_fps_slider], outputs=[desired_fps, desired_frames])
-        return [upload_anim, anim_clear_frames, anim_common_seed, anim_resize, desired_fps, desired_frames, desired_fps_slider]
+        return [upload_anim, anim_clear_frames, anim_common_seed, anim_resize, desired_fps, desired_frames]
 
     #Grab the img2img image components for update later
     #Maybe there's a better way to do this?
@@ -233,7 +213,14 @@ class Script(scripts.Script):
             self.img2img_h_slider = component
             return self.img2img_h_slider
 
-    def run(self, p, upload_anim, anim_clear_frames, anim_common_seed, anim_resize, desired_fps, desired_frames, desired_fps_slider, *args):
+    def run(self, p: modules.processing.StableDiffusionProcessing, upload_anim, anim_clear_frames, anim_common_seed, anim_resize, desired_fps, desired_frames, *args):
+        cnet_present = False
+        try:
+            cnet = importlib.import_module('extensions.sd-webui-controlnet.scripts.external_code', 'external_code')
+            cnet_present = True
+        except:
+            pass
+        orig_p = copy.copy(p)
         try:
             if self.gif_mode:
                 #inc_gif = Image.open(upload_anim.name)
@@ -255,13 +242,26 @@ class Script(scripts.Script):
         self.return_images, self.all_prompts, self.infotexts, self.inter_images = [], [], [], []
         
         #Actual generation function
-        def generate_frame(image, p):
+        def generate_frame(image):
             if state.skipped: state.skipped = False
             if state.interrupted: return
             state.job = f"{state.job_no + 1} out of {state.job_count}"
-            copy_p.init_images = [image] * p.batch_size
-            copy_p.control_net_input_image = image.convert("RGB")
-            proc = process_images(copy_p) #process
+            p.init_images = [image] * p.batch_size
+
+            #Handle controlnets
+            if cnet_present:
+                cn_layers = cnet.get_all_units_in_processing(orig_p)
+                new_layers = []
+                for layer in cn_layers:
+                    if (layer.image == None) and (layer.enabled == True):
+                        nimg = np.array(image.convert("RGB"))
+                        bimg = np.zeros((image.width, image.height, 3), dtype = np.uint8)
+                        layer.image = {"image" : nimg, "mask" : bimg}
+                    new_layers.append(layer)
+                cnet.update_cn_script_in_processing(p, new_layers)
+            #Process
+
+            proc = process_images(p)
             #Handle batches
             proc_batch = []
             for pi in proc.images:
@@ -279,9 +279,9 @@ class Script(scripts.Script):
             return return_img 
         
         #Wrapper for moviepy function
-        def generate_mpframe(image, p):
+        def generate_mpframe(image):
             nimg = Image.fromarray(image)
-            return np.array(generate_frame(nimg, p))
+            return np.array(generate_frame(nimg))
         
         #Fix/setup vars
         state.job_count = int(desired_frames * p.n_iter)
@@ -295,9 +295,9 @@ class Script(scripts.Script):
         for x in range(anim_n_iter):
             if state.skipped: state.skipped = False
             if state.interrupted: break
-            copy_p = copy.copy(p)
+            #copy_p = copy.copy(p)
             if(anim_common_seed and (p.seed == -1)):
-                modules.processing.fix_seed(copy_p)
+                modules.processing.fix_seed(p)
             if self.gif_mode:
                 prv_frame = inc_frames[0]
             else:
@@ -305,21 +305,21 @@ class Script(scripts.Script):
             out_filename_png = (modules.images.save_image(prv_frame, p.outpath_samples, "frame2frame", extension = 'png')[0])
             out_filename_noext = os.path.basename(out_filename_png).split(".")[0]
             if not anim_clear_frames:
-                copy_p.outpath_samples = os.path.join(p.outpath_samples, out_filename_noext)
-                print(f"Saving intermediary files to {copy_p.outpath_samples}..")
+                p.outpath_samples = os.path.join(p.outpath_samples, out_filename_noext)
+                print(f"Saving intermediary files to {p.outpath_samples}..")
             #color_correction = [modules.processing.setup_color_correction(copy_p.init_images[0])]
             #Generate frames
             if self.gif_mode:
                 generated_frames = []
                 out_filename = out_filename_png.replace(".png",".gif")
                 for frame in inc_frames:
-                    generated_frames.append(generate_frame(frame, p=copy_p))
+                    generated_frames.append(generate_frame(frame))
                 generated_frames[0].save(out_filename,
                     save_all = True, append_images = generated_frames[1:], loop = 0,
                     optimize = False, duration = int(self.desired_gif_dur))
             else:
                 out_filename = out_filename_png.replace(".png",".mp4")
-                out_clip = inc_clip.fl_image(lambda image: generate_mpframe(image, p=copy_p))
+                out_clip = inc_clip.fl_image(lambda image: generate_mpframe(image))
                 out_clip.write_videofile(filename=out_filename, audio=False)
                 if inc_clip_raw.audio != None: #Restore audio if present
                     video.io.ffmpeg_tools.ffmpeg_merge_video_audio(out_filename, soundtrack_file, out_filename.replace(".mp4","_WithAudio.mp4"))
@@ -329,4 +329,4 @@ class Script(scripts.Script):
             modules.images.save_image(prv_frame, p.outpath_samples, "frame2frame", info=current_info, forced_filename = out_filename_noext, extension = 'png')
             self.return_images.append(out_filename_png)
 
-        return Processed(copy_p, self.return_images, copy_p.seed, "", all_prompts=self.all_prompts, infotexts=self.infotexts)
+        return Processed(p, self.return_images, p.seed, "", all_prompts=self.all_prompts, infotexts=self.infotexts)
