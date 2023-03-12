@@ -181,7 +181,7 @@ class Script(scripts.Script):
                 self.orig_num_frames = 0
                 return None, None, gr.File.update(value=None, visible=True), gr.Image.update(visible=False), gr.Video.update(visible=False), 0, 0, 0, 0, 0
             else: #do nothing
-                return gr.Image.update(), gr.Image.update(), gr.File.update(), gr.Image.update(), gr.Video.update(), gr.Textbox.update(), gr.Textbox.update(), gr.Textbox.update(), gr.Textbox.update(), gr.Textbox.update()
+                return gr.Image.update(), gr.Image.update(), gr.File.update(), gr.Image.update(), gr.Video.update(), gr.Number.update(), gr.Number.update(), gr.Number.update(), gr.Number.update(), gr.Number.update()
 
         def updatefps(fps_factor):
             if self.orig_fps == 0:
